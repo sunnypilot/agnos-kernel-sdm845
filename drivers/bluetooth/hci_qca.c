@@ -1224,6 +1224,11 @@ static int qca_setup(struct hci_uart *hu)
 	/* Patch downloading has to be done without IBS mode */
 	clear_bit(STATE_IN_BAND_SLEEP_ENABLED, &qca->flags);
 
+	/* Enable controller to do both LE scan and BR/EDR inquiry
+	 * simultaneously.
+	 */
+	set_bit(HCI_QUIRK_SIMULTANEOUS_DISCOVERY, &hdev->quirks);
+
 	if (soc_type == QCA_WCN3990) {
 		bt_dev_info(hdev, "setting up wcn3990");
 		ret = qca_wcn3990_init(hu);
