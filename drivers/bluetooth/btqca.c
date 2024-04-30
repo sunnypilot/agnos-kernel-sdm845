@@ -112,7 +112,7 @@ static int qca_send_reset(struct hci_dev *hdev)
 	return 0;
 }
 
-static void qca_tlv_check_data(struct rome_config *config,
+static int qca_tlv_check_data(struct rome_config *config,
 				const struct firmware *fw)
 {
 	const u8 *data;
@@ -122,6 +122,9 @@ static void qca_tlv_check_data(struct rome_config *config,
 	struct tlv_type_hdr *tlv;
 	struct tlv_type_patch *tlv_patch;
 	struct tlv_type_nvm *tlv_nvm;
+
+	if (fw->size < sizeof(struct tlv_type_hdr))
+		return -EINVAL;
 
 	tlv = (struct tlv_type_hdr *)fw->data;
 
@@ -136,6 +139,9 @@ static void qca_tlv_check_data(struct rome_config *config,
 
 	switch (config->type) {
 	case TLV_TYPE_PATCH:
+		if (fw->size < sizeof(struct tlv_type_hdr) + sizeof(struct tlv_type_patch))
+			return -EINVAL;
+
 		tlv_patch = (struct tlv_type_patch *)tlv->data;
 
 		/* For Rome version 1.1 to 3.1, all segment commands
@@ -172,17 +178,26 @@ static void qca_tlv_check_data(struct rome_config *config,
 		break;
 
 	case TLV_TYPE_NVM:
+		if (fw->size < length + (tlv->data - fw->data))
+			return -EINVAL;
+
 		idx = 0;
 		data = tlv->data;
-		while (idx < length) {
+		while (idx < length - sizeof(struct tlv_type_nvm)) {
 			tlv_nvm = (struct tlv_type_nvm *)(data + idx);
 
 			tag_id = le16_to_cpu(tlv_nvm->tag_id);
 			tag_len = le16_to_cpu(tlv_nvm->tag_len);
 
+			if (length < idx + sizeof(struct tlv_type_nvm) + tag_len)
+				return -EINVAL;
+
 			/* Update NVM tags as needed */
 			switch (tag_id) {
 			case EDL_TAG_ID_HCI:
+				if (tag_len < 3)
+					return -EINVAL;
+
 				/* HCI transport layer parameters
 				 * enabling software inband sleep
 				 * onto controller side.
@@ -195,6 +210,9 @@ static void qca_tlv_check_data(struct rome_config *config,
 				break;
 
 			case EDL_TAG_ID_DEEP_SLEEP:
+				if (tag_len < 1)
+					return -EINVAL;
+
 				/* Sleep enable mask
 				 * enabling deep sleep feature on controller.
 				 */
@@ -203,14 +221,16 @@ static void qca_tlv_check_data(struct rome_config *config,
 				break;
 			}
 
-			idx += (sizeof(u16) + sizeof(u16) + 8 + tag_len);
+			idx += sizeof(struct tlv_type_nvm) + tag_len;
 		}
 		break;
 
 	default:
 		BT_ERR("Unknown TLV type %d", config->type);
-		break;
+		return -EINVAL;
 	}
+
+	return 0;
 }
 
 static int qca_tlv_send_segment(struct hci_dev *hdev, int seg_size,
@@ -307,7 +327,9 @@ static int qca_download_firmware(struct hci_dev *hdev,
 		return ret;
 	}
 
-	qca_tlv_check_data(config, fw);
+	ret = qca_tlv_check_data(config, fw);
+	if (ret)
+		goto out;
 
 	segment = fw->data;
 	remain = fw->size;
