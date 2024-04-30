@@ -122,6 +122,7 @@ static int qca_tlv_check_data(struct rome_config *config,
 	struct tlv_type_hdr *tlv;
 	struct tlv_type_patch *tlv_patch;
 	struct tlv_type_nvm *tlv_nvm;
+	u8 type;
 
 	if (fw->size < sizeof(struct tlv_type_hdr))
 		return -EINVAL;
@@ -178,6 +179,29 @@ static int qca_tlv_check_data(struct rome_config *config,
 		break;
 
 	case TLV_TYPE_NVM:
+		type = type_len & 0xff;
+
+		/* Some NVM files have more than one set of tags, only parse
+		 * the first set when it has type 2 for now. When there is
+		 * more than one set there is an enclosing header of type 4.
+		 */
+		if (type == 4) {
+			if (fw->size < 2 * sizeof(struct tlv_type_hdr))
+				return -EINVAL;
+
+			tlv++;
+
+			type_len = le32_to_cpu(tlv->type_len);
+			length = type_len >> 8;
+			type = type_len & 0xff;
+		}
+
+		BT_DBG("TLV Type\t\t : 0x%x", type);
+		BT_DBG("Length\t\t : %d bytes", length);
+
+		if (type != 2)
+			break;
+
 		if (fw->size < length + (tlv->data - fw->data))
 			return -EINVAL;
 
