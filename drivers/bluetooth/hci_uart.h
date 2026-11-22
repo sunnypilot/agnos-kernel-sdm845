@@ -77,6 +77,7 @@ struct hci_uart_proto {
 
 struct hci_uart {
 	struct tty_struct	*tty;
+	struct serdev_device	*serdev;
 	struct hci_dev		*hdev;
 	unsigned long		flags;
 	unsigned long		hdev_flags;
@@ -112,6 +113,16 @@ void hci_uart_set_baudrate(struct hci_uart *hu, unsigned int speed);
 void hci_uart_set_flow_control(struct hci_uart *hu, bool enable);
 void hci_uart_set_speeds(struct hci_uart *hu, unsigned int init_speed,
 			 unsigned int oper_speed);
+
+static inline int hci_uart_register_device(struct hci_uart *hu,
+					   const struct hci_uart_proto *p)
+{
+	return -ENODEV;
+}
+
+static inline void hci_uart_unregister_device(struct hci_uart *hu)
+{
+}
 
 #ifdef CONFIG_BT_HCIUART_H4
 int h4_init(void);
