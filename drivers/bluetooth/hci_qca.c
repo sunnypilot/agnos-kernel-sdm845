@@ -41,6 +41,7 @@
 #include <linux/platform_device.h>
 #include <linux/regulator/consumer.h>
 #include <linux/serdev.h>
+#include <linux/tty.h>
 
 #include <net/bluetooth/bluetooth.h>
 #include <net/bluetooth/hci_core.h>
@@ -175,6 +176,21 @@ struct qca_serdev {
 static int qca_power_setup(struct hci_uart *hu, bool on);
 static void qca_power_shutdown(struct hci_uart *hu);
 
+/* Without serdev the vendor bt_power driver owns the WCN3990 node and its
+ * rails, and the controller is attached over the ldisc.
+ */
+static bool qca_ldisc_is_wcn3990(void)
+{
+	struct device_node *np;
+	bool found;
+
+	np = of_find_compatible_node(NULL, NULL, "qca,wcn3990");
+	found = np && of_device_is_available(np);
+	of_node_put(np);
+
+	return found;
+}
+
 static enum qca_btsoc_type qca_soc_type(struct hci_uart *hu)
 {
 	enum qca_btsoc_type soc_type;
@@ -183,6 +199,8 @@ static enum qca_btsoc_type qca_soc_type(struct hci_uart *hu)
 		struct qca_serdev *qsd = serdev_device_get_drvdata(hu->serdev);
 
 		soc_type = qsd->btsoc_type;
+	} else if (qca_ldisc_is_wcn3990()) {
+		soc_type = QCA_WCN3990;
 	} else {
 		soc_type = QCA_ROME;
 	}
@@ -1027,6 +1045,9 @@ static int qca_set_baudrate(struct hci_dev *hdev, uint8_t baudrate)
 	if (hu->serdev)
 		serdev_device_wait_until_sent(hu->serdev,
 		      msecs_to_jiffies(CMD_TRANS_TIMEOUT_MS));
+	else
+		tty_wait_until_sent(hu->tty,
+				    msecs_to_jiffies(CMD_TRANS_TIMEOUT_MS));
 
 	/* Give the controller time to process the request */
 	if (qca_soc_type(hu) == QCA_WCN3990)
@@ -1063,15 +1084,24 @@ static int qca_send_power_pulse(struct hci_uart *hu, bool on)
 	 */
 	bt_dev_dbg(hu->hdev, "sending power pulse %02x to controller", cmd);
 
-	serdev_device_write_flush(hu->serdev);
+	if (hu->serdev)
+		serdev_device_write_flush(hu->serdev);
+	else
+		tty_driver_flush_buffer(hu->tty);
 	hci_uart_set_flow_control(hu, true);
-	ret = serdev_device_write_buf(hu->serdev, &cmd, sizeof(cmd));
+	if (hu->serdev)
+		ret = serdev_device_write_buf(hu->serdev, &cmd, sizeof(cmd));
+	else
+		ret = hu->tty->ops->write(hu->tty, &cmd, sizeof(cmd));
 	if (ret < 0) {
 		bt_dev_err(hu->hdev, "failed to send power pulse %02x", cmd);
 		return ret;
 	}
 
-	serdev_device_wait_until_sent(hu->serdev, timeout);
+	if (hu->serdev)
+		serdev_device_wait_until_sent(hu->serdev, timeout);
+	else
+		tty_wait_until_sent(hu->tty, timeout);
 	hci_uart_set_flow_control(hu, false);
 
 	/* Give to controller time to boot/shutdown */
@@ -1196,11 +1226,15 @@ static int qca_wcn3990_init(struct hci_uart *hu)
 	 * Without this, we will have RTS and CTS synchronization
 	 * issues.
 	 */
-	serdev_device_close(hu->serdev);
-	ret = serdev_device_open(hu->serdev);
-	if (ret) {
-		bt_dev_err(hu->hdev, "failed to open port");
-		return ret;
+	if (hu->serdev) {
+		serdev_device_close(hu->serdev);
+		ret = serdev_device_open(hu->serdev);
+		if (ret) {
+			bt_dev_err(hu->hdev, "failed to open port");
+			return ret;
+		}
+	} else {
+		hci_uart_set_flow_control(hu, true);
 	}
 
 	hci_uart_set_flow_control(hu, false);
@@ -1231,6 +1265,12 @@ static int qca_setup(struct hci_uart *hu)
 
 	if (soc_type == QCA_WCN3990) {
 		bt_dev_info(hdev, "setting up wcn3990");
+
+		/* The NVM address is the same on every device: stay
+		 * unconfigured until userspace sets one.
+		 */
+		set_bit(HCI_QUIRK_INVALID_BDADDR, &hdev->quirks);
+
 		ret = qca_wcn3990_init(hu);
 		if (ret)
 			return ret;
@@ -1356,6 +1396,9 @@ static int qca_power_setup(struct hci_uart *hu, bool on)
 	struct regulator_bulk_data *vreg_bulk;
 	struct qca_serdev *qcadev;
 	int i, num_vregs, ret = 0;
+
+	if (!hu->serdev)
+		return 0;
 
 	qcadev = serdev_device_get_drvdata(hu->serdev);
 	if (!qcadev || !qcadev->bt_power || !qcadev->bt_power->vreg_data ||
