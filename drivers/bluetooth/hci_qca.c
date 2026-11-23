@@ -1191,15 +1191,14 @@ error:
 			hci_uart_set_flow_control(hu, false);
 
 		if (soc_type == QCA_WCN3990) {
-			/* Wait for the controller to send the vendor event
-			 * for the baudrate change command.
+			/* Over the ldisc the vendor event can be lost while
+			 * the host port is reconfigured; the next command
+			 * shows whether the controller switched.
 			 */
 			if (!wait_for_completion_timeout(&qca->drop_ev_comp,
-						 msecs_to_jiffies(100))) {
-				bt_dev_err(hu->hdev,
-					   "Failed to change controller baudrate\n");
-				ret = -ETIMEDOUT;
-			}
+						 msecs_to_jiffies(100)))
+				bt_dev_warn(hu->hdev,
+					    "Baudrate change event not received\n");
 
 			clear_bit(QCA_DROP_VENDOR_EVENT, &qca->flags);
 		}
