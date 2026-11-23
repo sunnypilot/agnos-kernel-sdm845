@@ -556,6 +556,8 @@ static int qca_open(struct hci_uart *hu)
 				return ret;
 			}
 		}
+	} else if (qca_ldisc_is_wcn3990()) {
+		hu->oper_speed = 3200000;
 	}
 
 	setup_timer(&qca->wake_retrans_timer, hci_ibs_wake_retrans_timeout,
