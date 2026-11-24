@@ -98,9 +98,32 @@
   status = "ok";
 };
 
-/* Bluetooth UART */
-&qupv3_se6_4uart {
-  status = "ok";
+/*
+ * Bluetooth UART, redefined under a new node name so it is created after
+ * the pin controller and GPIO interrupt numbers stay as without it.
+ * The same name would be merged back in place by dtc.
+ */
+/delete-node/ &qupv3_se6_4uart;
+&soc {
+	qupv3_se6_4uart: qcom,qup_uart@898000 {
+		compatible = "qcom,msm-geni-serial-hs";
+		reg = <0x898000 0x4000>;
+		reg-names = "se_phys";
+		clock-names = "se-clk", "m-ahb", "s-ahb";
+		clocks = <&clock_gcc GCC_QUPV3_WRAP0_S6_CLK>,
+			<&clock_gcc GCC_QUPV3_WRAP_0_M_AHB_CLK>,
+			<&clock_gcc GCC_QUPV3_WRAP_0_S_AHB_CLK>;
+		pinctrl-names = "default", "sleep";
+		pinctrl-0 = <&qupv3_se6_ctsrx>, <&qupv3_se6_rts>,
+							<&qupv3_se6_tx> ;
+		pinctrl-1 = <&qupv3_se6_ctsrx>, <&qupv3_se6_rts>,
+							<&qupv3_se6_tx> ;
+		interrupts-extended = <&pdc GIC_SPI 607 0>,
+				<&tlmm 48 0>;
+		status = "ok";
+		qcom,wakeup-byte = <0xFD>;
+		qcom,wrapper-core = <&qupv3_0>;
+	};
 };
 
 /* regulators */
