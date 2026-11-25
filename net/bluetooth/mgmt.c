@@ -6242,6 +6242,12 @@ static int add_advertising(struct sock *sk, struct hci_dev *hdev,
 		goto unlock;
 	}
 
+	/* New advertising data gets a new private address, so no data
+	 * links two addresses and no address links two sets of data.
+	 */
+	if (hci_dev_test_flag(hdev, HCI_PRIVACY))
+		hci_dev_set_flag(hdev, HCI_RPA_EXPIRED);
+
 	/* Only trigger an advertising added event if a new instance was
 	 * actually added.
 	 */
